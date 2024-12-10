@@ -1,0 +1,68 @@
+name: Go binary build workflow
+
+on:
+  workflow_call:
+    inputs:
+      buildTag:
+        required: true
+        type: string
+
+  push:
+    branches:
+      #   - feat/github-action
+      - action/*
+      - runtime/*
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go 1.23.x
+        uses: actions/setup-go@v5
+        with:
+          # Semantic version range syntax or exact version of Go
+          go-version: "1.23.x"
+          cache-dependency-path: src/go.sum
+      - name: Install dependencies
+        run: cd src && go get .
+      - name: Build
+        run: |
+          PACKAGE_BRANCH=${{ inputs.buildTag }} make build
+      - name: Read migration
+        id: read_migration
+        run: |
+          echo "MIGRATION=$(cat migration.txt)" >> $GITHUB_ENV
+          echo ${{ github.ref_name }} > version.txt
+          cat version.txt
+
+      #   - name: Run tests
+      - name: Compress files (migration)
+        if: ${{ env.MIGRATION == 'true' }}
+        run: |
+          PACKAGE_BRANCH=${{ inputs.buildTag }} make github_release_migrate_compress
+      - name: Compress files (no migration)
+        if: ${{ env.MIGRATION == 'false' }}
+        run: |
+          PACKAGE_BRANCH=${{ inputs.buildTag }} make github_release_compress
+
+      - name: Get tag message
+        id: get_tag_message
+        run: |
+          TAG_MESSAGE=$(git tag -l --format='%(contents)' ${{ github.ref_name }})
+          echo "TAG_MESSAGE=${TAG_MESSAGE}" >> $GITHUB_ENV
+          echo "${TAG_MESSAGE}"
+
+      - name: Upload release
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: ${{ startsWith(github.ref, 'refs/heads/runtime/') }}
+          tag_name: ${{ github.ref_name }}
+          body: ${{ env.TAG_MESSAGE }}
+          files: ${{ inputs.buildTag }}-svm.tar.gz
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ inputs.buildTag }}-svm.tar.gz
+          path: ${{ inputs.buildTag }}-svm.tar.gz
